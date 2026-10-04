@@ -1533,7 +1533,7 @@ a:focus-visible {
     <div class="modal-overlay" id="modal-add-trip">
       <div class="modal-sheet">
         <div class="modal-handle"></div>
-        <h3>إضافة رحلة جديدة</h3>
+        <h3 id="add-trip-title">إضافة رحلة جديدة</h3>
         <div class="field">
           <label for="input-trip-from">من</label>
           <div class="input-wrap"><input type="text" id="input-trip-from" list="datalist-places" placeholder="اكتب أو اختر المدينة/المنطقة"></div>
@@ -1574,7 +1574,7 @@ a:focus-visible {
         </div>
         <div class="field-error" id="error-add-trip"></div>
         <button class="btn btn-primary" id="btn-submit-add-trip">
-          <span class="btn-label">نشر الرحلة</span><span class="spinner"></span>
+          <span class="btn-label" id="add-trip-btn-label">نشر الرحلة</span><span class="spinner"></span>
         </button>
         <button class="btn btn-text" data-close-modal style="margin-top:10px;">إلغاء</button>
       </div>
@@ -1841,6 +1841,11 @@ const APP_CONFIG = {
 
 </script>
 <script>
+/* حماية XSS: تهريب أي نص مُدخَل من المستخدمين قبل عرضه داخل innerHTML */
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 /* =========================================================================
    عبور إكسبريس — طبقة الوصول للبيانات عبر Supabase
    -------------------------------------------------------------------------
@@ -1924,6 +1929,14 @@ const UbourDB = (() => {
       const { data, error } = await supabaseClient.from('managers').select('*').order('is_primary', { ascending: false });
       if (error) { console.error(error); return []; }
       return data;
+    },
+    /** رقم المدير الرئيسي (لطلب تجديد الاشتراك) عبر دالة آمنة؛ يرجع للطريقة القديمة إن لم تُنشأ الدالة بعد */
+    async getPrimaryManagerPhone() {
+      const { data, error } = await supabaseClient.rpc('get_primary_manager_phone');
+      if (!error && data) return data;
+      const ms = await this.getManagers();
+      const p = ms.find(m => m.is_primary) || ms[0];
+      return p ? p.phone : null;
     },
     async addManager(phone) {
       const { error } = await supabaseClient.from('managers').insert({ phone, is_primary: false });
@@ -2426,7 +2439,7 @@ function initLoginScreen() {
     showScreen('screen-forgot-password');
   });
 
-  async function submit() {
+  async function submitLogin() {
     const phoneRaw = phoneInput.value.trim();
     const password = pwInput.value;
     errorEl.classList.remove('show');
@@ -2459,8 +2472,8 @@ function initLoginScreen() {
     await routeUserAfterAuth();
   }
 
-  btn.addEventListener('click', submit);
-  pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  btn.addEventListener('click', submitLogin);
+  pwInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 }
 
 /* =========================================================================
@@ -2474,7 +2487,7 @@ function initRegisterPhoneScreen() {
 
   document.getElementById('btn-register-phone-back').addEventListener('click', () => goBack('screen-login'));
 
-  async function submit() {
+  async function submitRegisterPhone() {
     const raw = phoneInput.value.trim();
     errorEl.classList.remove('show');
     document.getElementById('wrap-reg-phone').classList.remove('has-error');
@@ -2504,8 +2517,8 @@ function initRegisterPhoneScreen() {
     showScreen('screen-register-account');
   }
 
-  btn.addEventListener('click', submit);
-  phoneInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  btn.addEventListener('click', submitRegisterPhone);
+  phoneInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitRegisterPhone(); });
 }
 
 /* =========================================================================
@@ -2530,7 +2543,7 @@ function initRegisterAccountScreen() {
     strengthLabel.textContent = pwInput.value ? labels[score] : '8 أحرف على الأقل، حروف وأرقام';
   });
 
-  async function submit() {
+  async function submitRegisterAccount() {
     errorEl.classList.remove('show');
     [document.getElementById('wrap-reg-email'), document.getElementById('wrap-reg-password'), document.getElementById('wrap-reg-password-confirm')]
       .forEach(w => w.classList.remove('has-error'));
@@ -2588,8 +2601,8 @@ function initRegisterAccountScreen() {
     }
   }
 
-  btn.addEventListener('click', submit);
-  pwConfirm.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  btn.addEventListener('click', submitRegisterAccount);
+  pwConfirm.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitRegisterAccount(); });
 
   document.getElementById('btn-check-email-continue').addEventListener('click', () => {
     showScreen('screen-login', { replace: true });
@@ -2838,19 +2851,19 @@ async function renderTravelerTrips(filterText) {
   list.innerHTML = trips.map(t => {
     const office = t.office;
     const avatar = office && office.logo_url
-      ? `<img src="${office.logo_url}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-inline-end:6px;">`
+      ? `<img src="${esc(office.logo_url)}" alt="" style="width:22px;height:22px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-inline-end:6px;">`
       : '';
     return `
     <div class="list-card">
       <div class="lc-top">
-        <span class="lc-sub">${avatar}${(office && office.name) || t.office_name}</span>
+        <span class="lc-sub">${avatar}${esc((office && office.name) || t.office_name)}</span>
         <span class="lc-price">${t.price} ${currencyLabel(t.currency)}</span>
       </div>
-      <div class="lc-route">${ICONS.route}<span>${t.from_place}</span>${ICONS.chevron}<span>${t.to_place}</span></div>
+      <div class="lc-route">${ICONS.route}<span>${esc(t.from_place)}</span>${ICONS.chevron}<span>${esc(t.to_place)}</span></div>
       <div class="lc-meta">
         <span>${ICONS.clock}${t.trip_date} — ${t.trip_time}</span>
         <span>${ICONS.users} ${t.seats_available} مقعد متاح</span>
-        ${t.vehicle_type ? `<span>${ICONS.bus} ${t.vehicle_type}</span>` : ''}
+        ${t.vehicle_type ? `<span>${ICONS.bus} ${esc(t.vehicle_type)}</span>` : ''}
       </div>
       <div class="lc-actions">
         <button class="btn btn-primary" data-book-trip="${t.id}" style="margin-top:0;">حجز مقعد</button>
@@ -2891,12 +2904,12 @@ async function renderTravelerBookings() {
     return `
       <div class="list-card">
         <div class="lc-top">
-          <span class="lc-sub">${(tripOffice && tripOffice.name) || trip.office_name}</span>
+          <span class="lc-sub">${esc((tripOffice && tripOffice.name) || trip.office_name)}</span>
           <span class="badge-pill status-${b.status}">${bookingStatusLabel(b.status)}</span>
         </div>
-        <div class="lc-route">${ICONS.route}<span>${trip.from_place}</span>${ICONS.chevron}<span>${trip.to_place}</span></div>
+        <div class="lc-route">${ICONS.route}<span>${esc(trip.from_place)}</span>${ICONS.chevron}<span>${esc(trip.to_place)}</span></div>
         <div class="lc-meta"><span>${ICONS.clock}${trip.trip_date} — ${trip.trip_time}</span><span>${b.seats} مقعد</span></div>
-        ${b.status === 'cancel_requested' && b.cancel_reason ? `<div class="lc-sub" style="color:var(--error); margin-top:6px;">سبب الإلغاء: ${b.cancel_reason}</div>` : ''}
+        ${b.status === 'cancel_requested' && b.cancel_reason ? `<div class="lc-sub" style="color:var(--error); margin-top:6px;">سبب الإلغاء: ${esc(b.cancel_reason)}</div>` : ''}
         ${canCancel ? `<div class="lc-actions"><button class="btn btn-ghost" data-cancel-booking="${b.id}" style="padding:10px; font-size:13px; color:var(--error); border-color:var(--error);">إلغاء الحجز</button></div>` : ''}
       </div>`;
   }));
@@ -3083,7 +3096,7 @@ async function renderOfficeScreen() {
 function renderOfficeAvatar(office) {
   const wrap = document.getElementById('office-avatar-wrap');
   if (office.logo_url) {
-    wrap.innerHTML = `<img src="${office.logo_url}" alt="شعار المكتب" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
+    wrap.innerHTML = `<img src="${esc(office.logo_url)}" alt="شعار المكتب" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
   } else {
     wrap.innerHTML = `<span id="icon-office-avatar">${ICONS.userCircle}</span>`;
   }
@@ -3108,12 +3121,12 @@ async function renderOfficeRequests(office) {
     return `
       <div class="list-card">
         <div class="lc-top">
-          <span class="lc-title">${b.traveler_name}</span>
+          <span class="lc-title">${esc(b.traveler_name)}</span>
           <span class="badge-pill status-${b.status}">${bookingStatusLabel(b.status)}</span>
         </div>
-        <div class="lc-route">${ICONS.route}<span>${trip.from_place}</span>${ICONS.chevron}<span>${trip.to_place}</span></div>
-        <div class="lc-meta"><span>${ICONS.clock}${trip.trip_date} — ${trip.trip_time}</span><span>${b.seats} مقعد</span>${trip.vehicle_type ? `<span>${ICONS.bus} ${trip.vehicle_type}</span>` : ''}</div>
-        ${cancelled && b.cancel_reason ? `<div class="lc-sub" style="color:var(--error); margin-bottom:10px;">سبب الإلغاء: ${b.cancel_reason}</div>` : ''}
+        <div class="lc-route">${ICONS.route}<span>${esc(trip.from_place)}</span>${ICONS.chevron}<span>${esc(trip.to_place)}</span></div>
+        <div class="lc-meta"><span>${ICONS.clock}${trip.trip_date} — ${trip.trip_time}</span><span>${b.seats} مقعد</span>${trip.vehicle_type ? `<span>${ICONS.bus} ${esc(trip.vehicle_type)}</span>` : ''}</div>
+        ${cancelled && b.cancel_reason ? `<div class="lc-sub" style="color:var(--error); margin-bottom:10px;">سبب الإلغاء: ${esc(b.cancel_reason)}</div>` : ''}
         <div class="lc-actions">
           ${!cancelled ? `<button class="whatsapp-btn" data-wa-booking="${b.id}">${ICONS.whatsapp}تواصل واتساب</button>` : ''}
           ${!cancelled && b.status !== 'completed' ? `<button class="icon-action-btn" data-cancel-booking="${b.id}" data-cancel-by="office" title="إلغاء الحجز">${ICONS.x}</button>` : ''}
@@ -3154,10 +3167,11 @@ async function renderOfficeTrips(office) {
         <span class="badge-pill status-${t.status === 'active' ? 'active' : t.status === 'cancelled' ? 'cancel_requested' : 'inactive'}">${tripStatusLabel(t.status)}</span>
         <span class="lc-price">${t.price} ${currencyLabel(t.currency)}</span>
       </div>
-      <div class="lc-route">${ICONS.route}<span>${t.from_place}</span>${ICONS.chevron}<span>${t.to_place}</span></div>
-      <div class="lc-meta"><span>${ICONS.clock}${t.trip_date} — ${t.trip_time}</span><span>${t.seats_available}/${t.seats_total} مقعد متاح</span>${t.vehicle_type ? `<span>${ICONS.bus} ${t.vehicle_type}</span>` : ''}</div>
-      ${t.status === 'cancelled' && t.cancel_reason ? `<div class="lc-sub" style="color:var(--error); margin-bottom:10px;">سبب الإلغاء: ${t.cancel_reason}</div>` : ''}
+      <div class="lc-route">${ICONS.route}<span>${esc(t.from_place)}</span>${ICONS.chevron}<span>${esc(t.to_place)}</span></div>
+      <div class="lc-meta"><span>${ICONS.clock}${t.trip_date} — ${t.trip_time}</span><span>${t.seats_available}/${t.seats_total} مقعد متاح</span>${t.vehicle_type ? `<span>${ICONS.bus} ${esc(t.vehicle_type)}</span>` : ''}</div>
+      ${t.status === 'cancelled' && t.cancel_reason ? `<div class="lc-sub" style="color:var(--error); margin-bottom:10px;">سبب الإلغاء: ${esc(t.cancel_reason)}</div>` : ''}
       <div class="lc-actions">
+        ${t.status !== 'cancelled' ? `<button class="btn btn-ghost" data-edit-trip="${t.id}" style="padding:11px; font-size:13px; flex:1;">تعديل</button>` : ''}
         ${t.status === 'active' ? `<button class="btn btn-ghost" data-cancel-trip="${t.id}" style="padding:11px; font-size:13px; flex:1;">إلغاء الرحلة</button>` : ''}
         <button class="icon-action-btn" data-delete-trip="${t.id}">${ICONS.trash}</button>
       </div>
@@ -3173,6 +3187,32 @@ async function renderOfficeTrips(office) {
   list.querySelectorAll('[data-cancel-trip]').forEach(btn => {
     btn.addEventListener('click', () => openCancelModal(btn.dataset.cancelTrip, 'office', 'trip'));
   });
+  list.querySelectorAll('[data-edit-trip]').forEach(btn => {
+    btn.addEventListener('click', () => openEditTripModal(trips.find(x => x.id === btn.dataset.editTrip)));
+  });
+}
+
+/* ---- تعديل رحلة (للمكتب/السائق صاحب الرحلة فقط — تفرضه قاعدة البيانات أيضاً عبر RLS) ---- */
+let _editingTrip = null;
+const _TRIP_FIELD_IDS = ['input-trip-from', 'input-trip-to', 'input-trip-vehicle', 'input-trip-price', 'input-trip-seats', 'input-trip-date', 'input-trip-time'];
+function _setTripModalMode(editing) {
+  document.getElementById('add-trip-title').textContent = editing ? 'تعديل الرحلة' : 'إضافة رحلة جديدة';
+  document.getElementById('add-trip-btn-label').textContent = editing ? 'حفظ التعديلات' : 'نشر الرحلة';
+  document.getElementById('error-add-trip').classList.remove('show');
+}
+function openEditTripModal(trip) {
+  if (!trip) return;
+  _editingTrip = trip;
+  _setTripModalMode(true);
+  document.getElementById('input-trip-from').value = trip.from_place || '';
+  document.getElementById('input-trip-to').value = trip.to_place || '';
+  document.getElementById('input-trip-vehicle').value = trip.vehicle_type || '';
+  document.getElementById('input-trip-price').value = trip.price;
+  document.getElementById('select-trip-currency').value = trip.currency;
+  document.getElementById('input-trip-seats').value = trip.seats_total;
+  document.getElementById('input-trip-date').value = trip.trip_date;
+  document.getElementById('input-trip-time').value = String(trip.trip_time || '').slice(0, 5);
+  document.getElementById('modal-add-trip').classList.add('active');
 }
 
 function initOfficeScreen() {
@@ -3190,12 +3230,11 @@ function initOfficeScreen() {
   // طلب تجديد الاشتراك عبر واتساب — يتواصل مباشرة مع المدير الرئيسي؛
   // التجديد الفعلي وتحديد التواريخ يبقى بيد المدير حصرياً من لوحة الإدارة
   document.getElementById('btn-request-subscription').addEventListener('click', async () => {
-    const managers = await UbourDB.getManagers();
-    const primary = managers.find(m => m.is_primary) || managers[0];
-    if (!primary) { showToast('تعذّر العثور على رقم الإدارة حالياً', 'error'); return; }
+    const primaryPhone = await UbourDB.getPrimaryManagerPhone();
+    if (!primaryPhone) { showToast('تعذّر العثور على رقم الإدارة حالياً', 'error'); return; }
     const office = await UbourDB.getCurrentProfile();
     const msg = `مرحباً، أرغب بتجديد اشتراك حسابي "${office ? office.name : ''}" في ${APP_CONFIG.nameShort}.`;
-    window.open(whatsappLink(primary.phone, msg), '_blank');
+    window.open(whatsappLink(primaryPhone, msg), '_blank');
   });
 
   // اقتراحات المدن/المناطق عبر datalist — لكن الحقل نص حر يقبل أي منطقة يكتبها
@@ -3206,6 +3245,9 @@ function initOfficeScreen() {
   document.getElementById('datalist-vehicle-types').innerHTML = APP_CONFIG.vehicleTypes.map(v => `<option value="${v}"></option>`).join('');
 
   document.getElementById('btn-open-add-trip').addEventListener('click', () => {
+    _editingTrip = null;
+    _setTripModalMode(false);
+    _TRIP_FIELD_IDS.forEach(id => document.getElementById(id).value = '');
     document.getElementById('modal-add-trip').classList.add('active');
   });
 
@@ -3228,6 +3270,33 @@ function initOfficeScreen() {
 
     const office = await UbourDB.getCurrentProfile();
     if (!office) return;
+
+    // وضع التعديل: تحديث الرحلة الحالية بدل إنشاء رحلة جديدة
+    if (_editingTrip) {
+      const booked = Number(_editingTrip.seats_total) - Number(_editingTrip.seats_available);
+      if (Number(seats) < booked) {
+        errorEl.textContent = 'لا يمكن أن يقل عدد المقاعد عن المقاعد المحجوزة حالياً (' + booked + ')';
+        errorEl.classList.add('show');
+        return;
+      }
+      try {
+        await UbourDB.updateTrip(_editingTrip.id, {
+          from_place: from, to_place: to, vehicle_type: vehicleType || null,
+          price: Number(price), currency,
+          seats_total: Number(seats), seats_available: Number(seats) - booked,
+          trip_date: date, trip_time: time
+        });
+        _editingTrip = null;
+        closeModals();
+        await renderOfficeTrips(office);
+        showToast(booked > 0 ? 'تم تحديث الرحلة — لديك حجوزات عليها، يُفضّل إبلاغ المسافرين بالتعديل' : 'تم تحديث الرحلة بنجاح', 'success');
+      } catch (e) {
+        showToast('تعذّر حفظ التعديلات، حاول مجدداً', 'error');
+        console.error(e);
+      }
+      return;
+    }
+
     try {
       await UbourDB.createTrip({ officeId: office.id, officeName: office.name, from, to, price, currency, seatsTotal: seats, date, time, vehicleType });
       closeModals();
@@ -3402,11 +3471,11 @@ async function renderAdminTrips() {
     return `
     <div class="list-card">
       <div class="lc-top">
-        <span class="lc-sub">${(office && office.name) || t.office_name}</span>
+        <span class="lc-sub">${esc((office && office.name) || t.office_name)}</span>
         <span class="badge-pill status-${t.status === 'active' ? 'active' : 'inactive'}">${tripStatusLabel(t.status)}</span>
       </div>
-      <div class="lc-route">${ICONS.route}<span>${t.from_place}</span>${ICONS.chevron}<span>${t.to_place}</span></div>
-      <div class="lc-meta"><span>${t.price} ${currencyLabel(t.currency)}</span><span>${t.seats_available}/${t.seats_total} مقعد</span><span>${t.trip_date} ${t.trip_time}</span>${t.vehicle_type ? `<span>${ICONS.bus} ${t.vehicle_type}</span>` : ''}</div>
+      <div class="lc-route">${ICONS.route}<span>${esc(t.from_place)}</span>${ICONS.chevron}<span>${esc(t.to_place)}</span></div>
+      <div class="lc-meta"><span>${t.price} ${currencyLabel(t.currency)}</span><span>${t.seats_available}/${t.seats_total} مقعد</span><span>${t.trip_date} ${t.trip_time}</span>${t.vehicle_type ? `<span>${ICONS.bus} ${esc(t.vehicle_type)}</span>` : ''}</div>
       <div class="lc-actions">
         <button class="icon-action-btn" data-admin-delete-trip="${t.id}">${ICONS.trash}</button>
       </div>
@@ -3432,10 +3501,10 @@ async function renderAdminOffices() {
     return `
     <div class="list-card">
       <div class="lc-top">
-        <span class="lc-title">${o.name}</span>
+        <span class="lc-title">${esc(o.name)}</span>
         <span class="badge-pill ${days > 0 ? 'status-active' : 'status-inactive'}">${days} يوم متبقي</span>
       </div>
-      <div class="lc-sub" style="direction:ltr; text-align:right; margin-bottom:8px;">${o.phone}</div>
+      <div class="lc-sub" style="direction:ltr; text-align:right; margin-bottom:8px;">${esc(o.phone)}</div>
       <div class="lc-actions">
         <button class="btn btn-ghost" data-extend-office="${o.id}" style="padding:11px; font-size:13px;">تمديد 30 يوم</button>
       </div>
@@ -3456,10 +3525,10 @@ async function renderAdminManagers() {
   list.innerHTML = managers.map(m => `
     <div class="list-card" style="display:flex; align-items:center; justify-content:space-between;">
       <div>
-        <div class="lc-title" style="direction:ltr; text-align:right;">${m.phone}${myProfile && myProfile.phone === m.phone ? ' (أنت)' : ''}</div>
+        <div class="lc-title" style="direction:ltr; text-align:right;">${esc(m.phone)}${myProfile && myProfile.phone === m.phone ? ' (أنت)' : ''}</div>
         <div class="lc-sub">${m.is_primary ? 'مدير رئيسي' : 'مدير'}</div>
       </div>
-      ${!m.is_primary ? `<button class="icon-action-btn" data-remove-manager="${m.phone}">${ICONS.trash}</button>` : ''}
+      ${!m.is_primary ? `<button class="icon-action-btn" data-remove-manager="${esc(m.phone)}">${ICONS.trash}</button>` : ''}
     </div>
   `).join('');
   list.querySelectorAll('[data-remove-manager]').forEach(btn => {
@@ -3478,10 +3547,10 @@ async function renderAdminAds() {
   list.innerHTML = ads.slice().reverse().map(a => `
     <div class="list-card">
       <div class="lc-top">
-        <span class="lc-title">${a.title}</span>
+        <span class="lc-title">${esc(a.title)}</span>
         <button class="icon-action-btn" data-delete-ad="${a.id}">${ICONS.trash}</button>
       </div>
-      ${a.description ? `<div class="lc-sub">${a.description}</div>` : ''}
+      ${a.description ? `<div class="lc-sub">${esc(a.description)}</div>` : ''}
     </div>
   `).join('');
   list.querySelectorAll('[data-delete-ad]').forEach(btn => {
@@ -3497,10 +3566,10 @@ async function renderAdminSupport(filter) {
   list.innerHTML = items.map(s => `
     <div class="list-card">
       <div class="lc-top">
-        <span class="lc-title">${s.from_name || s.from_phone}</span>
+        <span class="lc-title">${esc(s.from_name || s.from_phone)}</span>
         <span class="badge-pill ${s.status === 'open' ? 'status-pending' : 'status-completed'}">${s.status === 'open' ? 'مفتوحة' : 'مغلقة'}</span>
       </div>
-      <div class="lc-sub" style="margin-bottom:10px;">${s.message}</div>
+      <div class="lc-sub" style="margin-bottom:10px;">${esc(s.message)}</div>
       ${s.status === 'open' ? `<button class="btn btn-ghost" data-close-support="${s.id}" style="padding:10px; font-size:13px;">إغلاق</button>` : ''}
     </div>
   `).join('');
